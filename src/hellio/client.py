@@ -17,6 +17,7 @@ from .errors import (
     InsufficientBalanceError,
     InvalidApiTokenError,
     RateLimitError,
+    ServiceUnavailableError,
     ValidationError,
 )
 
@@ -145,9 +146,9 @@ class Hellio:
         """Send a one-time passcode.
 
         Args:
-            to: Phone number (sms/voice) or email address (email channel).
-            sender: Sender ID. Required for sms/voice, ignored for email.
-            channel: ``sms`` (default), ``voice``, or ``email``.
+            to: Phone number (sms/voice/whatsapp) or email address (email channel).
+            sender: Sender ID. Required for sms/voice, ignored for whatsapp and email.
+            channel: ``sms`` (default), ``voice``, ``whatsapp``, or ``email``.
             purpose: Optional purpose label.
             length: Optional code length (4-10 digits).
             expiry: Optional validity window in minutes.
@@ -310,6 +311,7 @@ class Hellio:
             402: InsufficientBalanceError,
             422: ValidationError,
             429: RateLimitError,
+            503: ServiceUnavailableError,
         }.get(response.status_code, HellioError)
 
         raise error_class(message, response.status_code, data)

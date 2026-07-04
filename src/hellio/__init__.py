@@ -14,6 +14,7 @@ from .errors import (
     InsufficientBalanceError,
     InvalidApiTokenError,
     RateLimitError,
+    ServiceUnavailableError,
     ValidationError,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "InsufficientBalanceError",
     "ValidationError",
     "RateLimitError",
+    "ServiceUnavailableError",
     "__version__",
 ]

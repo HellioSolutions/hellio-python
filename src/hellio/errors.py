@@ -53,10 +53,16 @@ class RateLimitError(HellioError):
     """Raised on HTTP 429. The 120 requests/minute limit was exceeded."""
 
 
+class ServiceUnavailableError(HellioError):
+    """Raised on HTTP 503. The service was switched off by an admin (SMS, OTP,
+    voice, WhatsApp, lookup, email) or the API is paused. Transient: retry later."""
+
+
 __all__ = [
     "HellioError",
     "InvalidApiTokenError",
     "InsufficientBalanceError",
     "ValidationError",
     "RateLimitError",
+    "ServiceUnavailableError",
 ]
