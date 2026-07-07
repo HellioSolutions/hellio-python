@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 import httpx
 
 from .errors import (
+    ConflictError,
     HellioError,
     InsufficientBalanceError,
     InvalidApiTokenError,
@@ -20,6 +21,7 @@ from .errors import (
     ServiceUnavailableError,
     ValidationError,
 )
+from .ussd import Ussd
 
 Recipients = Union[str, Sequence[str]]
 
@@ -67,6 +69,9 @@ class Hellio:
                 "Content-Type": "application/json",
             },
         )
+
+        #: USSD endpoints (pricing, apps, extensions, sessions, simulate).
+        self.ussd = Ussd(self)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -279,6 +284,11 @@ class Hellio:
     ) -> Dict[str, Any]:
         return self._request("POST", path, json=body)
 
+    def _put(
+        self, path: str, body: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return self._request("PUT", path, json=body)
+
     def _delete(self, path: str) -> Dict[str, Any]:
         return self._request("DELETE", path)
 
@@ -304,11 +314,14 @@ class Hellio:
 
         message = data.get("message")
         if not isinstance(message, str) or not message:
+            message = data.get("error")
+        if not isinstance(message, str) or not message:
             message = "Hellio API request failed."
 
         error_class = {
             401: InvalidApiTokenError,
             402: InsufficientBalanceError,
+            409: ConflictError,
             422: ValidationError,
             429: RateLimitError,
             503: ServiceUnavailableError,

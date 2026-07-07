@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from hellio import (
+    ConflictError,
     Hellio,
     HellioError,
     InsufficientBalanceError,
@@ -177,6 +178,180 @@ def test_delete_webhook(client: Hellio) -> None:
     assert route.calls.last.request.method == "DELETE"
 
 
+# ----------------------------------------------------------------------- ussd
+
+def test_ussd_pricing(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/pricing").mock(
+            return_value=httpx.Response(200, json={"data": {"short_code": "920"}})
+        )
+        result = client.ussd.pricing()
+    assert result == {"data": {"short_code": "920"}}
+    assert str(route.calls.last.request.url) == f"{BASE}/ussd/pricing"
+
+
+def test_ussd_availability_sends_code(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/pricing/availability").mock(
+            return_value=httpx.Response(200, json={"data": {"valid": True}})
+        )
+        client.ussd.availability(100)
+    assert dict(route.calls.last.request.url.params) == {"code": "100"}
+
+
+def test_ussd_apps_list_omits_cursor(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/apps").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        client.ussd.apps()
+    assert "cursor" not in dict(route.calls.last.request.url.params)
+
+
+def test_ussd_apps_list_passes_cursor(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/apps").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        client.ussd.apps(cursor="abc")
+    assert dict(route.calls.last.request.url.params) == {"cursor": "abc"}
+
+
+def test_ussd_create_app(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post("/ussd/apps").mock(
+            return_value=httpx.Response(201, json={"data": {"id": 7}})
+        )
+        result = client.ussd.create_app("Topup", "https://x.test/ussd")
+
+    assert result == {"data": {"id": 7}}
+    payload = _json.loads(route.calls.last.request.read())
+    assert payload == {"name": "Topup", "callback_url": "https://x.test/ussd"}
+
+
+def test_ussd_update_app_uses_put_and_omits_none(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.put("/ussd/apps/7").mock(
+            return_value=httpx.Response(200, json={"data": {"id": 7}})
+        )
+        client.ussd.update_app(7, active=True)
+
+    request = route.calls.last.request
+    assert request.method == "PUT"
+    assert _json.loads(request.read()) == {"active": True}
+
+
+def test_ussd_delete_app(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.delete("/ussd/apps/7").mock(
+            return_value=httpx.Response(204)
+        )
+        client.ussd.delete_app(7)
+    assert route.calls.last.request.method == "DELETE"
+
+
+def test_ussd_extensions_list(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/extensions").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        client.ussd.extensions()
+    assert str(route.calls.last.request.url) == f"{BASE}/ussd/extensions"
+
+
+def test_ussd_rent_extension_body(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post("/ussd/extensions").mock(
+            return_value=httpx.Response(201, json={"data": {"id": 3}})
+        )
+        client.ussd.rent_extension(100, app_id=7)
+
+    assert _json.loads(route.calls.last.request.read()) == {"code": 100, "app_id": 7}
+
+
+def test_ussd_rent_extension_conflict(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        mock.post("/ussd/extensions").mock(
+            return_value=httpx.Response(409, json={"error": "extension_unavailable"})
+        )
+        with pytest.raises(ConflictError) as info:
+            client.ussd.rent_extension(100)
+
+    assert info.value.status_code == 409
+    assert info.value.message == "extension_unavailable"
+
+
+def test_ussd_rent_extension_insufficient_balance(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        mock.post("/ussd/extensions").mock(
+            return_value=httpx.Response(402, json={"error": "insufficient_balance"})
+        )
+        with pytest.raises(InsufficientBalanceError):
+            client.ussd.rent_extension(100)
+
+
+def test_ussd_release_extension(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.delete("/ussd/extensions/3").mock(
+            return_value=httpx.Response(204)
+        )
+        client.ussd.release_extension(3)
+    assert route.calls.last.request.method == "DELETE"
+
+
+def test_ussd_sessions_with_status(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/sessions").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        client.ussd.sessions(status="ended")
+    assert dict(route.calls.last.request.url.params) == {"status": "ended"}
+
+
+def test_ussd_session_get(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/ussd/sessions/sess_1").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "sess_1"}})
+        )
+        result = client.ussd.session("sess_1")
+    assert result == {"data": {"id": "sess_1"}}
+    assert str(route.calls.last.request.url) == f"{BASE}/ussd/sessions/sess_1"
+
+
+def test_ussd_simulate_body(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post("/ussd/simulate").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"message": "Hi", "action": "continue", "continue": True}},
+            )
+        )
+        client.ussd.simulate(
+            msisdn="233241234567",
+            service_code="*920*100#",
+            user_input="1",
+            session_id="sess_1",
+            new_session=True,
+        )
+
+    payload = _json.loads(route.calls.last.request.read())
+    assert payload == {
+        "session_id": "sess_1",
+        "msisdn": "233241234567",
+        "service_code": "*920*100#",
+        "input": "1",
+        "new_session": True,
+    }
+
+
 # -------------------------------------------------------------- error mapping
 
 @pytest.mark.parametrize(
@@ -184,6 +359,7 @@ def test_delete_webhook(client: Hellio) -> None:
     [
         (401, InvalidApiTokenError),
         (402, InsufficientBalanceError),
+        (409, ConflictError),
         (422, ValidationError),
         (429, RateLimitError),
         (500, HellioError),

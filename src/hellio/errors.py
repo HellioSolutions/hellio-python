@@ -45,6 +45,11 @@ class InsufficientBalanceError(HellioError):
     """Raised on HTTP 402. The account balance is too low for the request."""
 
 
+class ConflictError(HellioError):
+    """Raised on HTTP 409. The request conflicts with the current state, e.g. a
+    USSD extension that is no longer available to rent (``extension_unavailable``)."""
+
+
 class ValidationError(HellioError):
     """Raised on HTTP 422. One or more request fields failed validation."""
 
@@ -62,6 +67,7 @@ __all__ = [
     "HellioError",
     "InvalidApiTokenError",
     "InsufficientBalanceError",
+    "ConflictError",
     "ValidationError",
     "RateLimitError",
     "ServiceUnavailableError",

@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "helliomessaging"
-version = "1.0.0"
-description = "Official Python SDK for the Hellio Messaging API (SMS, OTP, Voice, Number Lookup, Email Verification, Webhooks)."
+version = "1.1.0"
+description = "Official Python SDK for the Hellio Messaging API (SMS, OTP, Voice, USSD, Number Lookup, Email Verification, Webhooks)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Albert Ninyeh", email = "eaglesecurity0@gmail.com" }]
-keywords = ["hellio", "sms", "otp", "voice", "messaging", "hlr", "email-verification"]
+keywords = ["hellio", "sms", "otp", "voice", "ussd", "messaging", "hlr", "email-verification"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

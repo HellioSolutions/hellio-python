@@ -6,8 +6,9 @@
 [![License](https://img.shields.io/pypi/l/helliomessaging.svg)](LICENSE)
 
 Python client for the [Hellio Messaging](https://helliomessaging.com) API v1:
-**SMS**, **OTP** (SMS / email / voice), **Voice broadcasts**, **Number Lookup (HLR)**,
-**Email Verification**, and **Webhooks**. Fully type-hinted and synchronous.
+**SMS**, **OTP** (SMS / email / voice), **Voice broadcasts**, **USSD**,
+**Number Lookup (HLR)**, **Email Verification**, and **Webhooks**. Fully
+type-hinted and synchronous.
 
 ## Install
 ```bash
@@ -90,6 +91,81 @@ client.webhooks()
 client.delete_webhook(1)
 ```
 
+## USSD
+USSD lives under the `client.ussd` namespace. Needs a token with the `ussd`
+ability. You rent an **extension** (a short-code suffix, e.g. `*920*100#`), point
+it at a USSD **app** whose `callback_url` Hellio calls on every step, and can
+inspect **sessions** or `simulate` a step without dialling the real code. List
+endpoints are cursor-paginated (`data` array + `meta.next_cursor`).
+
+```python
+from hellio import Hellio
+
+client = Hellio(token="your-token-here")
+
+# Pricing and availability
+client.ussd.pricing()                      # session prices per network + extension rents
+client.ussd.availability(100)              # {'data': {'valid': True, 'available': True, 'monthly_price': '50.00'}}
+
+# Apps (the callback endpoints Hellio POSTs session steps to)
+client.ussd.apps()                         # list (pass cursor="..." for the next page)
+app = client.ussd.create_app("Airtime Top-up", "https://your-app.com/ussd")
+app_id = app["data"]["id"]
+client.ussd.update_app(app_id, name="Airtime", active=True)
+client.ussd.delete_app(app_id)
+
+# Extensions (short-code suffixes you rent and bind to an app)
+client.ussd.extensions()
+ext = client.ussd.rent_extension(100, app_id=app_id)
+client.ussd.release_extension(ext["data"]["id"])
+
+# Sessions
+client.ussd.sessions(status="ended")       # optional status filter
+client.ussd.session("sess_ref_123")
+
+# Simulate a subscriber step against your callback (no real dialling)
+client.ussd.simulate(
+    msisdn="233241234567",
+    service_code="*920*100#",
+    user_input="1",
+    new_session=True,
+)
+# -> {'data': {'message': 'Welcome...', 'action': 'continue', 'continue': True}}
+```
+
+Renting an extension that has just been taken raises `ConflictError` (409); an
+empty balance raises `InsufficientBalanceError` (402):
+
+```python
+from hellio import ConflictError, InsufficientBalanceError
+
+try:
+    client.ussd.rent_extension(100)
+except ConflictError:
+    ...  # someone else rented it first; try another code
+except InsufficientBalanceError:
+    ...  # top up
+```
+
+### Inbound callback
+When a subscriber uses your extension, Hellio POSTs
+`{ sessionId, msisdn, serviceCode, input, sequence, mode }` to the app's
+`callback_url`, signed with an `X-Hellio-Signature` header
+(`HMAC-SHA256(rawBody, app.secret)`). Verify the signature, then return
+`{ message, action }` where `action` is `"continue"` or `"end"`:
+
+```python
+import hashlib
+import hmac
+
+def handle_ussd(raw_body: bytes, signature: str, secret: str) -> dict:
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise ValueError("bad signature")
+    # ... branch on the parsed payload ...
+    return {"message": "Welcome to Airtime Top-up", "action": "continue"}
+```
+
 ## Error handling
 Non-2xx responses raise typed exceptions (all extend `HellioError`). Each error
 carries `message`, `status_code`, and `response` (the parsed body); validation
@@ -99,6 +175,7 @@ errors also expose `errors`.
 |---|---|
 | `InvalidApiTokenError` | 401 |
 | `InsufficientBalanceError` | 402 |
+| `ConflictError` | 409 |
 | `ValidationError` (`.errors`) | 422 |
 | `RateLimitError` | 429 |
 | `HellioError` | other |
