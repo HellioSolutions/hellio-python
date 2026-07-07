@@ -42,7 +42,13 @@ class InvalidApiTokenError(HellioError):
 
 
 class InsufficientBalanceError(HellioError):
-    """Raised on HTTP 402. The account balance is too low for the request."""
+    """Raised on HTTP 402. A balance is too low for the request, e.g. the
+    dedicated USSD balance when renting an extension (``insufficient_ussd_balance``)."""
+
+
+class ExtensionRequiredError(HellioError):
+    """Raised on HTTP 402 (``extension_required``) when switching a USSD app to
+    live mode before an extension has been purchased for it."""
 
 
 class ConflictError(HellioError):
@@ -67,6 +73,7 @@ __all__ = [
     "HellioError",
     "InvalidApiTokenError",
     "InsufficientBalanceError",
+    "ExtensionRequiredError",
     "ConflictError",
     "ValidationError",
     "RateLimitError",

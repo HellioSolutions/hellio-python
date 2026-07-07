@@ -93,10 +93,19 @@ client.delete_webhook(1)
 
 ## USSD
 USSD lives under the `client.ussd` namespace. Needs a token with the `ussd`
-ability. You rent an **extension** (a short-code suffix, e.g. `*920*100#`), point
-it at a USSD **app** whose `callback_url` Hellio calls on every step, and can
-inspect **sessions** or `simulate` a step without dialling the real code. List
-endpoints are cursor-paginated (`data` array + `meta.next_cursor`).
+ability. You build a USSD **app** whose `callback_url` Hellio calls on every
+step, `simulate` it in the sandbox by `app_id`, rent an **extension** (a
+short-code suffix, e.g. `*920*100#`) from your dedicated USSD balance, then flip
+the app to **live** mode. You can also inspect **sessions**. List endpoints are
+cursor-paginated (`data` array + `meta.next_cursor`).
+
+Every app has a **test** and a **live** mode. A new app starts in `test` and
+carries two secrets, `test_secret` (`ussk_test_...`) and `live_secret`
+(`ussk_live_...`); the active one is the secret for the current `mode`.
+Simulation always runs in the sandbox (test mode): no charge, no extension
+needed. Going live requires a purchased extension, and live USSD sessions are
+billed to a dedicated USSD balance, separate from your SMS credit and main
+wallet.
 
 ```python
 from hellio import Hellio
@@ -107,51 +116,67 @@ client = Hellio(token="your-token-here")
 client.ussd.pricing()                      # session prices per network + extension rents
 client.ussd.availability(100)              # {'data': {'valid': True, 'available': True, 'monthly_price': '50.00'}}
 
-# Apps (the callback endpoints Hellio POSTs session steps to)
-client.ussd.apps()                         # list (pass cursor="..." for the next page)
+# 1. Create an app (starts in test mode; ids are UUID strings)
 app = client.ussd.create_app("Airtime Top-up", "https://your-app.com/ussd")
-app_id = app["data"]["id"]
+app_id = app["data"]["id"]                 # e.g. "9b1f...": a UUID string
+# app["data"] also has: mode, test_secret, live_secret, is_live, active
+client.ussd.apps()                         # list (pass cursor="..." for the next page)
 client.ussd.update_app(app_id, name="Airtime", active=True)
-client.ussd.delete_app(app_id)
 
-# Extensions (short-code suffixes you rent and bind to an app)
+# 2. Simulate a subscriber step in the sandbox (no dialling, no charge)
+client.ussd.simulate(
+    app_id=app_id,
+    session_id="sess-1",
+    msisdn="233241234567",
+    input="1",
+    new_session=True,
+)
+# -> {'data': {'message': 'Welcome...', 'action': 'continue', 'continue': True}}
+
+# 3. Rent an extension from your USSD balance and bind it to the app
 client.ussd.extensions()
 ext = client.ussd.rent_extension(100, app_id=app_id)
-client.ussd.release_extension(ext["data"]["id"])
+
+# 4. Go live (needs a purchased extension) and rotate secrets as needed
+client.ussd.set_mode(app_id, "live")
+client.ussd.rotate_secret(app_id, "live")
 
 # Sessions
 client.ussd.sessions(status="ended")       # optional status filter
 client.ussd.session("sess_ref_123")
 
-# Simulate a subscriber step against your callback (no real dialling)
-client.ussd.simulate(
-    msisdn="233241234567",
-    service_code="*920*100#",
-    user_input="1",
-    new_session=True,
-)
-# -> {'data': {'message': 'Welcome...', 'action': 'continue', 'continue': True}}
+# Teardown
+client.ussd.release_extension(ext["data"]["id"])
+client.ussd.delete_app(app_id)
 ```
 
-Renting an extension that has just been taken raises `ConflictError` (409); an
-empty balance raises `InsufficientBalanceError` (402):
+Renting an extension that has just been taken raises `ConflictError` (409); too
+low a USSD balance raises `InsufficientBalanceError` (402,
+`insufficient_ussd_balance`); switching to live before an extension is purchased
+raises `ExtensionRequiredError` (402, `extension_required`):
 
 ```python
-from hellio import ConflictError, InsufficientBalanceError
+from hellio import ConflictError, ExtensionRequiredError, InsufficientBalanceError
 
 try:
     client.ussd.rent_extension(100)
 except ConflictError:
     ...  # someone else rented it first; try another code
 except InsufficientBalanceError:
-    ...  # top up
+    ...  # top up your USSD balance
+
+try:
+    client.ussd.set_mode(app_id, "live")
+except ExtensionRequiredError:
+    ...  # rent an extension for the app first
 ```
 
 ### Inbound callback
 When a subscriber uses your extension, Hellio POSTs
 `{ sessionId, msisdn, serviceCode, input, sequence, mode }` to the app's
 `callback_url`, signed with an `X-Hellio-Signature` header
-(`HMAC-SHA256(rawBody, app.secret)`). Verify the signature, then return
+(`HMAC-SHA256(rawBody, secret)`, where `secret` is the app's `test_secret` or
+`live_secret` for the `mode` on the request). Verify the signature, then return
 `{ message, action }` where `action` is `"continue"` or `"end"`:
 
 ```python
@@ -174,7 +199,8 @@ errors also expose `errors`.
 | Exception | Status |
 |---|---|
 | `InvalidApiTokenError` | 401 |
-| `InsufficientBalanceError` | 402 |
+| `InsufficientBalanceError` | 402 (`insufficient_ussd_balance`) |
+| `ExtensionRequiredError` | 402 (`extension_required`) |
 | `ConflictError` | 409 |
 | `ValidationError` (`.errors`) | 422 |
 | `RateLimitError` | 429 |

@@ -14,6 +14,7 @@ import httpx
 
 from .errors import (
     ConflictError,
+    ExtensionRequiredError,
     HellioError,
     InsufficientBalanceError,
     InvalidApiTokenError,
@@ -312,20 +313,30 @@ class Hellio:
         if 200 <= response.status_code < 300:
             return data
 
+        slug = data.get("error")
         message = data.get("message")
         if not isinstance(message, str) or not message:
-            message = data.get("error")
+            message = slug
         if not isinstance(message, str) or not message:
             message = "Hellio API request failed."
 
-        error_class = {
-            401: InvalidApiTokenError,
-            402: InsufficientBalanceError,
-            409: ConflictError,
-            422: ValidationError,
-            429: RateLimitError,
-            503: ServiceUnavailableError,
-        }.get(response.status_code, HellioError)
+        # Some slugs share a status code (e.g. 402 covers both an insufficient
+        # balance and a missing extension), so a slug match wins over the
+        # status-code default when present.
+        slug_errors = {
+            "insufficient_ussd_balance": InsufficientBalanceError,
+            "extension_required": ExtensionRequiredError,
+        }
+        error_class = slug_errors.get(slug) if isinstance(slug, str) else None
+        if error_class is None:
+            error_class = {
+                401: InvalidApiTokenError,
+                402: InsufficientBalanceError,
+                409: ConflictError,
+                422: ValidationError,
+                429: RateLimitError,
+                503: ServiceUnavailableError,
+            }.get(response.status_code, HellioError)
 
         raise error_class(message, response.status_code, data)
 

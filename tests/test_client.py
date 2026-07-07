@@ -8,6 +8,7 @@ import respx
 
 from hellio import (
     ConflictError,
+    ExtensionRequiredError,
     Hellio,
     HellioError,
     InsufficientBalanceError,
@@ -17,6 +18,7 @@ from hellio import (
 )
 
 BASE = "https://api.helliomessaging.com/v1"
+APP_ID = "9b1f0e3a-4c2d-4a7b-8e1f-0a1b2c3d4e5f"
 
 
 @pytest.fixture
@@ -220,13 +222,26 @@ def test_ussd_apps_list_passes_cursor(client: Hellio) -> None:
 def test_ussd_create_app(client: Hellio) -> None:
     import json as _json
 
+    app = {
+        "id": APP_ID,
+        "name": "Topup",
+        "callback_url": "https://x.test/ussd",
+        "mode": "test",
+        "test_secret": "ussk_test_abc123",
+        "live_secret": "ussk_live_def456",
+        "is_live": False,
+        "active": True,
+    }
     with respx.mock(base_url=BASE) as mock:
         route = mock.post("/ussd/apps").mock(
-            return_value=httpx.Response(201, json={"data": {"id": 7}})
+            return_value=httpx.Response(201, json={"data": app})
         )
         result = client.ussd.create_app("Topup", "https://x.test/ussd")
 
-    assert result == {"data": {"id": 7}}
+    assert result == {"data": app}
+    assert result["data"]["mode"] == "test"
+    assert result["data"]["test_secret"].startswith("ussk_test_")
+    assert result["data"]["live_secret"].startswith("ussk_live_")
     payload = _json.loads(route.calls.last.request.read())
     assert payload == {"name": "Topup", "callback_url": "https://x.test/ussd"}
 
@@ -235,10 +250,10 @@ def test_ussd_update_app_uses_put_and_omits_none(client: Hellio) -> None:
     import json as _json
 
     with respx.mock(base_url=BASE) as mock:
-        route = mock.put("/ussd/apps/7").mock(
-            return_value=httpx.Response(200, json={"data": {"id": 7}})
+        route = mock.put(f"/ussd/apps/{APP_ID}").mock(
+            return_value=httpx.Response(200, json={"data": {"id": APP_ID}})
         )
-        client.ussd.update_app(7, active=True)
+        client.ussd.update_app(APP_ID, active=True)
 
     request = route.calls.last.request
     assert request.method == "PUT"
@@ -247,11 +262,54 @@ def test_ussd_update_app_uses_put_and_omits_none(client: Hellio) -> None:
 
 def test_ussd_delete_app(client: Hellio) -> None:
     with respx.mock(base_url=BASE) as mock:
-        route = mock.delete("/ussd/apps/7").mock(
+        route = mock.delete(f"/ussd/apps/{APP_ID}").mock(
             return_value=httpx.Response(204)
         )
-        client.ussd.delete_app(7)
+        client.ussd.delete_app(APP_ID)
     assert route.calls.last.request.method == "DELETE"
+
+
+def test_ussd_set_mode_body(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post(f"/ussd/apps/{APP_ID}/mode").mock(
+            return_value=httpx.Response(
+                200, json={"data": {"id": APP_ID, "mode": "live", "is_live": True}}
+            )
+        )
+        result = client.ussd.set_mode(APP_ID, "live")
+
+    assert result["data"]["mode"] == "live"
+    assert _json.loads(route.calls.last.request.read()) == {"mode": "live"}
+
+
+def test_ussd_set_mode_live_requires_extension(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        mock.post(f"/ussd/apps/{APP_ID}/mode").mock(
+            return_value=httpx.Response(402, json={"error": "extension_required"})
+        )
+        with pytest.raises(ExtensionRequiredError) as info:
+            client.ussd.set_mode(APP_ID, "live")
+
+    assert info.value.status_code == 402
+    assert info.value.message == "extension_required"
+
+
+def test_ussd_rotate_secret_body(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post(f"/ussd/apps/{APP_ID}/rotate-secret").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"id": APP_ID, "test_secret": "ussk_test_new"}},
+            )
+        )
+        result = client.ussd.rotate_secret(APP_ID, "test")
+
+    assert result["data"]["test_secret"] == "ussk_test_new"
+    assert _json.loads(route.calls.last.request.read()) == {"mode": "test"}
 
 
 def test_ussd_extensions_list(client: Hellio) -> None:
@@ -270,9 +328,12 @@ def test_ussd_rent_extension_body(client: Hellio) -> None:
         route = mock.post("/ussd/extensions").mock(
             return_value=httpx.Response(201, json={"data": {"id": 3}})
         )
-        client.ussd.rent_extension(100, app_id=7)
+        client.ussd.rent_extension(100, app_id=APP_ID)
 
-    assert _json.loads(route.calls.last.request.read()) == {"code": 100, "app_id": 7}
+    assert _json.loads(route.calls.last.request.read()) == {
+        "code": 100,
+        "app_id": APP_ID,
+    }
 
 
 def test_ussd_rent_extension_conflict(client: Hellio) -> None:
@@ -287,21 +348,26 @@ def test_ussd_rent_extension_conflict(client: Hellio) -> None:
     assert info.value.message == "extension_unavailable"
 
 
-def test_ussd_rent_extension_insufficient_balance(client: Hellio) -> None:
+def test_ussd_rent_extension_insufficient_ussd_balance(client: Hellio) -> None:
     with respx.mock(base_url=BASE) as mock:
         mock.post("/ussd/extensions").mock(
-            return_value=httpx.Response(402, json={"error": "insufficient_balance"})
+            return_value=httpx.Response(
+                402, json={"error": "insufficient_ussd_balance"}
+            )
         )
-        with pytest.raises(InsufficientBalanceError):
+        with pytest.raises(InsufficientBalanceError) as info:
             client.ussd.rent_extension(100)
+
+    assert info.value.status_code == 402
+    assert info.value.message == "insufficient_ussd_balance"
 
 
 def test_ussd_release_extension(client: Hellio) -> None:
     with respx.mock(base_url=BASE) as mock:
-        route = mock.delete("/ussd/extensions/3").mock(
+        route = mock.delete("/ussd/extensions/ext-3").mock(
             return_value=httpx.Response(204)
         )
-        client.ussd.release_extension(3)
+        client.ussd.release_extension("ext-3")
     assert route.calls.last.request.method == "DELETE"
 
 
@@ -335,21 +401,62 @@ def test_ussd_simulate_body(client: Hellio) -> None:
             )
         )
         client.ussd.simulate(
-            msisdn="233241234567",
-            service_code="*920*100#",
-            user_input="1",
+            app_id=APP_ID,
             session_id="sess_1",
+            msisdn="233241234567",
+            input="1",
             new_session=True,
+            service_code="*920*100#",
         )
 
     payload = _json.loads(route.calls.last.request.read())
     assert payload == {
+        "app_id": APP_ID,
         "session_id": "sess_1",
         "msisdn": "233241234567",
-        "service_code": "*920*100#",
         "input": "1",
         "new_session": True,
+        "service_code": "*920*100#",
     }
+
+
+def test_ussd_simulate_omits_service_code_when_none(client: Hellio) -> None:
+    import json as _json
+
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post("/ussd/simulate").mock(
+            return_value=httpx.Response(200, json={"data": {"message": "Hi"}})
+        )
+        client.ussd.simulate(
+            app_id=APP_ID,
+            session_id="sess_1",
+            msisdn="233241234567",
+            new_session=True,
+        )
+
+    payload = _json.loads(route.calls.last.request.read())
+    assert "service_code" not in payload
+    assert payload == {
+        "app_id": APP_ID,
+        "session_id": "sess_1",
+        "msisdn": "233241234567",
+        "input": "",
+        "new_session": True,
+    }
+
+
+def test_ussd_simulate_unknown_app(client: Hellio) -> None:
+    with respx.mock(base_url=BASE) as mock:
+        mock.post("/ussd/simulate").mock(
+            return_value=httpx.Response(422, json={"error": "unknown_app"})
+        )
+        with pytest.raises(ValidationError) as info:
+            client.ussd.simulate(
+                app_id=APP_ID, session_id="sess_1", msisdn="233241234567"
+            )
+
+    assert info.value.status_code == 422
+    assert info.value.message == "unknown_app"
 
 
 # -------------------------------------------------------------- error mapping

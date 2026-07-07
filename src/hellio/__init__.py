@@ -11,6 +11,7 @@ from __future__ import annotations
 from .client import Hellio
 from .errors import (
     ConflictError,
+    ExtensionRequiredError,
     HellioError,
     InsufficientBalanceError,
     InvalidApiTokenError,
@@ -20,7 +21,7 @@ from .errors import (
 )
 from .ussd import Ussd
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = [
     "Hellio",
@@ -28,6 +29,7 @@ __all__ = [
     "HellioError",
     "InvalidApiTokenError",
     "InsufficientBalanceError",
+    "ExtensionRequiredError",
     "ConflictError",
     "ValidationError",
     "RateLimitError",

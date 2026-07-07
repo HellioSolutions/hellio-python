@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-07
+
+### Added
+- USSD apps now have **test** and **live** modes. `create_app` responses expose
+  `id` (UUID string), `mode`, `test_secret` (`ussk_test_`), `live_secret`
+  (`ussk_live_`), `is_live`, and `active` in place of the single `secret`.
+- `client.ussd.set_mode(app_id, mode)` to switch an app between `test` and
+  `live`, and `client.ussd.rotate_secret(app_id, mode)` to rotate the secret for
+  a mode.
+- `ExtensionRequiredError` (402, `extension_required`), raised when switching an
+  app to live mode before an extension has been purchased.
+
+### Changed
+- App and extension ids are UUID strings; every id parameter (`update_app`,
+  `delete_app`, `rent_extension`'s `app_id`, `release_extension`, `session`, and
+  the new methods) is now typed `str`.
+- `simulate` now takes the app to target: `simulate(app_id, session_id, msisdn,
+  input="", new_session=False, service_code=None)`. `service_code` is optional
+  and defaults to the shared short code server-side. Simulation always runs in
+  the sandbox (test mode); an app you do not own returns 422 `unknown_app`.
+- Renting an extension draws from the dedicated USSD balance; on insufficient
+  funds it now returns 402 `insufficient_ussd_balance` (mapped to
+  `InsufficientBalanceError`).
+- Error mapping now honours the response `error` slug, so 402 responses resolve
+  to `InsufficientBalanceError` or `ExtensionRequiredError` as appropriate.
+
 ## [1.1.0] - 2026-07-07
 
 ### Added
